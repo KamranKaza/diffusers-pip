@@ -1,0 +1,1059 @@
+﻿diff --git a/scripts/convert_original_stable_diffusion_to_diffusers.py b/scripts/convert_original_stable_diffusion_to_diffusers.py
+index 375b12b..574d48f 100644
+--- a/scripts/convert_original_stable_diffusion_to_diffusers.py
++++ b/scripts/convert_original_stable_diffusion_to_diffusers.py
+@@ -40,7 +40,7 @@ from diffusers import (
+     UNet2DConditionModel,
+ )
+ from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
+-from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
++#from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
+ from transformers import AutoFeatureExtractor, BertTokenizerFast, CLIPTextModel, CLIPTokenizer
+ 
+ 
+@@ -731,7 +731,7 @@ if __name__ == "__main__":
+     if text_model_type == "FrozenCLIPEmbedder":
+         text_model = convert_ldm_clip_checkpoint(checkpoint)
+         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+-        safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
++        #safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
+         feature_extractor = AutoFeatureExtractor.from_pretrained("CompVis/stable-diffusion-safety-checker")
+         pipe = StableDiffusionPipeline(
+             vae=vae,
+@@ -739,7 +739,8 @@ if __name__ == "__main__":
+             tokenizer=tokenizer,
+             unet=unet,
+             scheduler=scheduler,
+-            safety_checker=safety_checker,
++            # safety_checker=safety_checker,
++            safety_checker=None,
+             feature_extractor=feature_extractor,
+         )
+     else:
+diff --git a/scripts/convert_stable_diffusion_checkpoint_to_onnx.py b/scripts/convert_stable_diffusion_checkpoint_to_onnx.py
+index f0e0b17..c95e44f 100644
+--- a/scripts/convert_stable_diffusion_checkpoint_to_onnx.py
++++ b/scripts/convert_stable_diffusion_checkpoint_to_onnx.py
+@@ -188,35 +188,36 @@ def convert_models(model_path: str, output_path: str, opset: int, fp16: bool = F
+     del pipeline.vae
+ 
+     # SAFETY CHECKER
+-    if pipeline.safety_checker is not None:
+-        safety_checker = pipeline.safety_checker
+-        clip_num_channels = safety_checker.config.vision_config.num_channels
+-        clip_image_size = safety_checker.config.vision_config.image_size
+-        safety_checker.forward = safety_checker.forward_onnx
+-        onnx_export(
+-            pipeline.safety_checker,
+-            model_args=(
+-                torch.randn(
+-                    1,
+-                    clip_num_channels,
+-                    clip_image_size,
+-                    clip_image_size,
+-                ).to(device=device, dtype=dtype),
+-                torch.randn(1, vae_sample_size, vae_sample_size, vae_out_channels).to(device=device, dtype=dtype),
+-            ),
+-            output_path=output_path / "safety_checker" / "model.onnx",
+-            ordered_input_names=["clip_input", "images"],
+-            output_names=["out_images", "has_nsfw_concepts"],
+-            dynamic_axes={
+-                "clip_input": {0: "batch", 1: "channels", 2: "height", 3: "width"},
+-                "images": {0: "batch", 1: "height", 2: "width", 3: "channels"},
+-            },
+-            opset=opset,
+-        )
+-        del pipeline.safety_checker
+-        safety_checker = OnnxRuntimeModel.from_pretrained(output_path / "safety_checker")
+-    else:
+-        safety_checker = None
++    # if pipeline.safety_checker is not None:
++    #     safety_checker = pipeline.safety_checker
++    #     clip_num_channels = safety_checker.config.vision_config.num_channels
++    #     clip_image_size = safety_checker.config.vision_config.image_size
++    #     safety_checker.forward = safety_checker.forward_onnx
++    #     onnx_export(
++    #         pipeline.safety_checker,
++    #         model_args=(
++    #             torch.randn(
++    #                 1,
++    #                 clip_num_channels,
++    #                 clip_image_size,
++    #                 clip_image_size,
++    #             ).to(device=device, dtype=dtype),
++    #             torch.randn(1, vae_sample_size, vae_sample_size, vae_out_channels).to(device=device, dtype=dtype),
++    #         ),
++    #         output_path=output_path / "safety_checker" / "model.onnx",
++    #         ordered_input_names=["clip_input", "images"],
++    #         output_names=["out_images", "has_nsfw_concepts"],
++    #         dynamic_axes={
++    #             "clip_input": {0: "batch", 1: "channels", 2: "height", 3: "width"},
++    #             "images": {0: "batch", 1: "height", 2: "width", 3: "channels"},
++    #         },
++    #         opset=opset,
++    #     )
++    #     del pipeline.safety_checker
++    #     safety_checker = OnnxRuntimeModel.from_pretrained(output_path / "safety_checker")
++    # else:
++    #     safety_checker = None
++    safety_checker = None
+ 
+     onnx_pipeline = OnnxStableDiffusionPipeline(
+         vae_encoder=OnnxRuntimeModel.from_pretrained(output_path / "vae_encoder"),
+diff --git a/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion.py b/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion.py
+index 246f2b8..3461fa6 100644
+--- a/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion.py
++++ b/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion.py
+@@ -114,15 +114,16 @@ class AltDiffusionPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Alt Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Alt Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -320,13 +321,14 @@ class AltDiffusionPipeline(DiffusionPipeline):
+         return text_embeddings
+ 
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     def decode_latents(self, latents):
+diff --git a/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion_img2img.py b/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion_img2img.py
+index 7fc1658..6fcb786 100644
+--- a/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion_img2img.py
++++ b/src/diffusers/pipelines/alt_diffusion/pipeline_alt_diffusion_img2img.py
+@@ -127,15 +127,16 @@ class AltDiffusionImg2ImgPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Alt Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Alt Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -333,13 +334,14 @@ class AltDiffusionImg2ImgPipeline(DiffusionPipeline):
+         return text_embeddings
+ 
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     def decode_latents(self, latents):
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_cycle_diffusion.py b/src/diffusers/pipelines/stable_diffusion/pipeline_cycle_diffusion.py
+index 8d702b1..ffeffa8 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_cycle_diffusion.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_cycle_diffusion.py
+@@ -159,15 +159,16 @@ class CycleDiffusionPipeline(DiffusionPipeline):
+             new_config["steps_offset"] = 1
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -407,13 +408,14 @@ class CycleDiffusionPipeline(DiffusionPipeline):
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_flax_stable_diffusion.py b/src/diffusers/pipelines/stable_diffusion/pipeline_flax_stable_diffusion.py
+index 9c668d5..8aa6526 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_flax_stable_diffusion.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_flax_stable_diffusion.py
+@@ -87,15 +87,16 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
+         super().__init__()
+         self.dtype = dtype
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -126,32 +127,32 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
+ 
+     def _run_safety_checker(self, images, safety_model_params, jit=False):
+         # safety_model_params should already be replicated when jit is True
+-        pil_images = [Image.fromarray(image) for image in images]
+-        features = self.feature_extractor(pil_images, return_tensors="np").pixel_values
+-
+-        if jit:
+-            features = shard(features)
+-            has_nsfw_concepts = _p_get_has_nsfw_concepts(self, features, safety_model_params)
+-            has_nsfw_concepts = unshard(has_nsfw_concepts)
+-            safety_model_params = unreplicate(safety_model_params)
+-        else:
+-            has_nsfw_concepts = self._get_has_nsfw_concepts(features, safety_model_params)
+-
+-        images_was_copied = False
+-        for idx, has_nsfw_concept in enumerate(has_nsfw_concepts):
+-            if has_nsfw_concept:
+-                if not images_was_copied:
+-                    images_was_copied = True
+-                    images = images.copy()
+-
+-                images[idx] = np.zeros(images[idx].shape, dtype=np.uint8)  # black image
+-
+-            if any(has_nsfw_concepts):
+-                warnings.warn(
+-                    "Potential NSFW content was detected in one or more images. A black image will be returned"
+-                    " instead. Try again with a different prompt and/or seed."
+-                )
+-
++        # pil_images = [Image.fromarray(image) for image in images]
++        # features = self.feature_extractor(pil_images, return_tensors="np").pixel_values
++
++        # if jit:
++        #     features = shard(features)
++        #     has_nsfw_concepts = _p_get_has_nsfw_concepts(self, features, safety_model_params)
++        #     has_nsfw_concepts = unshard(has_nsfw_concepts)
++        #     safety_model_params = unreplicate(safety_model_params)
++        # else:
++        #     has_nsfw_concepts = self._get_has_nsfw_concepts(features, safety_model_params)
++
++        # images_was_copied = False
++        # for idx, has_nsfw_concept in enumerate(has_nsfw_concepts):
++        #     if has_nsfw_concept:
++        #         if not images_was_copied:
++        #             images_was_copied = True
++        #             images = images.copy()
++
++        #         images[idx] = np.zeros(images[idx].shape, dtype=np.uint8)  # black image
++
++        #     if any(has_nsfw_concepts):
++        #         warnings.warn(
++        #             "Potential NSFW content was detected in one or more images. A black image will be returned"
++        #             " instead. Try again with a different prompt and/or seed."
++        #         )
++        has_nsfw_concepts = []
+         return images, has_nsfw_concepts
+ 
+     def _generate(
+@@ -330,24 +331,25 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
+                 neg_prompt_ids,
+             )
+ 
+-        if self.safety_checker is not None:
+-            safety_params = params["safety_checker"]
+-            images_uint8_casted = (images * 255).round().astype("uint8")
+-            num_devices, batch_size = images.shape[:2]
+-
+-            images_uint8_casted = np.asarray(images_uint8_casted).reshape(num_devices * batch_size, height, width, 3)
+-            images_uint8_casted, has_nsfw_concept = self._run_safety_checker(images_uint8_casted, safety_params, jit)
+-            images = np.asarray(images)
+-
+-            # block images
+-            if any(has_nsfw_concept):
+-                for i, is_nsfw in enumerate(has_nsfw_concept):
+-                    if is_nsfw:
+-                        images[i] = np.asarray(images_uint8_casted[i])
+-
+-            images = images.reshape(num_devices, batch_size, height, width, 3)
+-        else:
+-            has_nsfw_concept = False
++        # if self.safety_checker is not None:
++        #     safety_params = params["safety_checker"]
++        #     images_uint8_casted = (images * 255).round().astype("uint8")
++        #     num_devices, batch_size = images.shape[:2]
++
++        #     images_uint8_casted = np.asarray(images_uint8_casted).reshape(num_devices * batch_size, height, width, 3)
++        #     images_uint8_casted, has_nsfw_concept = self._run_safety_checker(images_uint8_casted, safety_params, jit)
++        #     images = np.asarray(images)
++
++        #     # block images
++        #     if any(has_nsfw_concept):
++        #         for i, is_nsfw in enumerate(has_nsfw_concept):
++        #             if is_nsfw:
++        #                 images[i] = np.asarray(images_uint8_casted[i])
++
++        #     images = images.reshape(num_devices, batch_size, height, width, 3)
++        # else:
++        #     has_nsfw_concept = False
++        has_nsfw_concept = False
+ 
+         if not return_dict:
+             return (images, has_nsfw_concept)
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion.py b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion.py
+index 9830ace..e8d5e47 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion.py
+@@ -81,6 +81,8 @@ class OnnxStableDiffusionPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
++        safety_checker = None
++
+         self.register_modules(
+             vae_encoder=vae_encoder,
+             vae_decoder=vae_decoder,
+@@ -280,24 +282,25 @@ class OnnxStableDiffusionPipeline(DiffusionPipeline):
+         image = np.clip(image / 2 + 0.5, 0, 1)
+         image = image.transpose((0, 2, 3, 1))
+ 
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(
+-                self.numpy_to_pil(image), return_tensors="np"
+-            ).pixel_values.astype(image.dtype)
+-
+-            image, has_nsfw_concepts = self.safety_checker(clip_input=safety_checker_input, images=image)
+-
+-            # There will throw an error if use safety_checker batchsize>1
+-            images, has_nsfw_concept = [], []
+-            for i in range(image.shape[0]):
+-                image_i, has_nsfw_concept_i = self.safety_checker(
+-                    clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
+-                )
+-                images.append(image_i)
+-                has_nsfw_concept.append(has_nsfw_concept_i[0])
+-            image = np.concatenate(images)
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(
++        #         self.numpy_to_pil(image), return_tensors="np"
++        #     ).pixel_values.astype(image.dtype)
++
++        #     image, has_nsfw_concepts = self.safety_checker(clip_input=safety_checker_input, images=image)
++
++        #     # There will throw an error if use safety_checker batchsize>1
++        #     images, has_nsfw_concept = [], []
++        #     for i in range(image.shape[0]):
++        #         image_i, has_nsfw_concept_i = self.safety_checker(
++        #             clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
++        #         )
++        #         images.append(image_i)
++        #         has_nsfw_concept.append(has_nsfw_concept_i[0])
++        #     image = np.concatenate(images)
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+ 
+         if output_type == "pil":
+             image = self.numpy_to_pil(image)
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_img2img.py b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_img2img.py
+index 1fc4786..4233302 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_img2img.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_img2img.py
+@@ -117,15 +117,16 @@ class OnnxStableDiffusionImg2ImgPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae_encoder=vae_encoder,
+@@ -420,21 +421,22 @@ class OnnxStableDiffusionImg2ImgPipeline(DiffusionPipeline):
+         image = np.clip(image / 2 + 0.5, 0, 1)
+         image = image.transpose((0, 2, 3, 1))
+ 
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(
+-                self.numpy_to_pil(image), return_tensors="np"
+-            ).pixel_values.astype(image.dtype)
+-            # safety_checker does not support batched inputs yet
+-            images, has_nsfw_concept = [], []
+-            for i in range(image.shape[0]):
+-                image_i, has_nsfw_concept_i = self.safety_checker(
+-                    clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
+-                )
+-                images.append(image_i)
+-                has_nsfw_concept.append(has_nsfw_concept_i[0])
+-            image = np.concatenate(images)
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(
++        #         self.numpy_to_pil(image), return_tensors="np"
++        #     ).pixel_values.astype(image.dtype)
++        #     # safety_checker does not support batched inputs yet
++        #     images, has_nsfw_concept = [], []
++        #     for i in range(image.shape[0]):
++        #         image_i, has_nsfw_concept_i = self.safety_checker(
++        #             clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
++        #         )
++        #         images.append(image_i)
++        #         has_nsfw_concept.append(has_nsfw_concept_i[0])
++        #     image = np.concatenate(images)
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+ 
+         if output_type == "pil":
+             image = self.numpy_to_pil(image)
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint.py b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint.py
+index b933c52..fe5c1bd 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint.py
+@@ -131,15 +131,16 @@ class OnnxStableDiffusionInpaintPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae_encoder=vae_encoder,
+@@ -443,21 +444,22 @@ class OnnxStableDiffusionInpaintPipeline(DiffusionPipeline):
+         image = np.clip(image / 2 + 0.5, 0, 1)
+         image = image.transpose((0, 2, 3, 1))
+ 
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(
+-                self.numpy_to_pil(image), return_tensors="np"
+-            ).pixel_values.astype(image.dtype)
+-            # safety_checker does not support batched inputs yet
+-            images, has_nsfw_concept = [], []
+-            for i in range(image.shape[0]):
+-                image_i, has_nsfw_concept_i = self.safety_checker(
+-                    clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
+-                )
+-                images.append(image_i)
+-                has_nsfw_concept.append(has_nsfw_concept_i[0])
+-            image = np.concatenate(images)
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(
++        #         self.numpy_to_pil(image), return_tensors="np"
++        #     ).pixel_values.astype(image.dtype)
++        #     # safety_checker does not support batched inputs yet
++        #     images, has_nsfw_concept = [], []
++        #     for i in range(image.shape[0]):
++        #         image_i, has_nsfw_concept_i = self.safety_checker(
++        #             clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
++        #         )
++        #         images.append(image_i)
++        #         has_nsfw_concept.append(has_nsfw_concept_i[0])
++        #     image = np.concatenate(images)
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+ 
+         if output_type == "pil":
+             image = self.numpy_to_pil(image)
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint_legacy.py b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint_legacy.py
+index 34f1d0e..b321991 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint_legacy.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_onnx_stable_diffusion_inpaint_legacy.py
+@@ -116,15 +116,16 @@ class OnnxStableDiffusionInpaintPipelineLegacy(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae_encoder=vae_encoder,
+@@ -422,21 +423,22 @@ class OnnxStableDiffusionInpaintPipelineLegacy(DiffusionPipeline):
+         image = np.clip(image / 2 + 0.5, 0, 1)
+         image = image.transpose((0, 2, 3, 1))
+ 
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(
+-                self.numpy_to_pil(image), return_tensors="np"
+-            ).pixel_values.astype(image.dtype)
+-            # There will throw an error if use safety_checker batchsize>1
+-            images, has_nsfw_concept = [], []
+-            for i in range(image.shape[0]):
+-                image_i, has_nsfw_concept_i = self.safety_checker(
+-                    clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
+-                )
+-                images.append(image_i)
+-                has_nsfw_concept.append(has_nsfw_concept_i[0])
+-            image = np.concatenate(images)
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(
++        #         self.numpy_to_pil(image), return_tensors="np"
++        #     ).pixel_values.astype(image.dtype)
++        #     # There will throw an error if use safety_checker batchsize>1
++        #     images, has_nsfw_concept = [], []
++        #     for i in range(image.shape[0]):
++        #         image_i, has_nsfw_concept_i = self.safety_checker(
++        #             clip_input=safety_checker_input[i : i + 1], images=image[i : i + 1]
++        #         )
++        #         images.append(image_i)
++        #         has_nsfw_concept.append(has_nsfw_concept_i[0])
++        #     image = np.concatenate(images)
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+ 
+         if output_type == "pil":
+             image = self.numpy_to_pil(image)
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py
+index fbfac6b..1cfaab4 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py
+@@ -113,15 +113,16 @@ class StableDiffusionPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -319,13 +320,14 @@ class StableDiffusionPipeline(DiffusionPipeline):
+         return text_embeddings
+ 
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     def decode_latents(self, latents):
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_image_variation.py b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_image_variation.py
+index 4cfa581..e5153cd 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_image_variation.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_image_variation.py
+@@ -82,15 +82,16 @@ class StableDiffusionImageVariationPipeline(DiffusionPipeline):
+     ):
+         super().__init__()
+ 
+-        if safety_checker is None:
+-            logger.warn(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warn(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -213,13 +214,14 @@ class StableDiffusionImageVariationPipeline(DiffusionPipeline):
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_img2img.py b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_img2img.py
+index 7efd39e..fad2678 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_img2img.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_img2img.py
+@@ -126,15 +126,16 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -340,13 +341,14 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint.py b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint.py
+index 9eb8de2..b40f713 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint.py
+@@ -191,15 +191,16 @@ class StableDiffusionInpaintPipeline(DiffusionPipeline):
+             new_config["skip_prk_steps"] = True
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -405,13 +406,14 @@ class StableDiffusionInpaintPipeline(DiffusionPipeline):
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.prepare_extra_step_kwargs
+diff --git a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint_legacy.py b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint_legacy.py
+index 003b266..7dc6a2a 100644
+--- a/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint_legacy.py
++++ b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint_legacy.py
+@@ -139,15 +139,16 @@ class StableDiffusionInpaintPipelineLegacy(DiffusionPipeline):
+             new_config["clip_sample"] = False
+             scheduler._internal_dict = FrozenDict(new_config)
+ 
+-        if safety_checker is None:
+-            logger.warning(
+-                f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
+-                " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
+-                " results in services or applications open to the public. Both the diffusers team and Hugging Face"
+-                " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
+-                " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
+-                " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
+-            )
++        # if safety_checker is None:
++        #     logger.warning(
++        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
++        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
++        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
++        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
++        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
++        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
++        #     )
++        safety_checker = None
+ 
+         self.register_modules(
+             vae=vae,
+@@ -353,13 +354,14 @@ class StableDiffusionInpaintPipelineLegacy(DiffusionPipeline):
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
+     def run_safety_checker(self, image, device, dtype):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-        else:
+-            has_nsfw_concept = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        # else:
++        #     has_nsfw_concept = None
++        has_nsfw_concept = None
+         return image, has_nsfw_concept
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
+diff --git a/src/diffusers/pipelines/stable_diffusion/safety_checker.py b/src/diffusers/pipelines/stable_diffusion/safety_checker.py
+index 0477c98..b3662e7 100644
+--- a/src/diffusers/pipelines/stable_diffusion/safety_checker.py
++++ b/src/diffusers/pipelines/stable_diffusion/safety_checker.py
+@@ -82,17 +82,18 @@ class StableDiffusionSafetyChecker(PreTrainedModel):
+ 
+             result.append(result_img)
+ 
+-        has_nsfw_concepts = [len(res["bad_concepts"]) > 0 for res in result]
++        #has_nsfw_concepts = [len(res["bad_concepts"]) > 0 for res in result]
++        has_nsfw_concepts = []
+ 
+-        for idx, has_nsfw_concept in enumerate(has_nsfw_concepts):
+-            if has_nsfw_concept:
+-                images[idx] = np.zeros(images[idx].shape)  # black image
++        # for idx, has_nsfw_concept in enumerate(has_nsfw_concepts):
++        #     if has_nsfw_concept:
++        #         images[idx] = np.zeros(images[idx].shape)  # black image
+ 
+-        if any(has_nsfw_concepts):
+-            logger.warning(
+-                "Potential NSFW content was detected in one or more images. A black image will be returned instead."
+-                " Try again with a different prompt and/or seed."
+-            )
++        # if any(has_nsfw_concepts):
++        #     logger.warning(
++        #         "Potential NSFW content was detected in one or more images. A black image will be returned instead."
++        #         " Try again with a different prompt and/or seed."
++        #     )
+ 
+         return images, has_nsfw_concepts
+ 
+@@ -116,8 +117,8 @@ class StableDiffusionSafetyChecker(PreTrainedModel):
+ 
+         concept_scores = (cos_dist - self.concept_embeds_weights) + special_adjustment
+         # concept_scores = concept_scores.round(decimals=3)
+-        has_nsfw_concepts = torch.any(concept_scores > 0, dim=1)
+-
+-        images[has_nsfw_concepts] = 0.0  # black image
++        #has_nsfw_concepts = torch.any(concept_scores > 0, dim=1)
++        has_nsfw_concepts = []
++        #images[has_nsfw_concepts] = 0.0  # black image
+ 
+         return images, has_nsfw_concepts
+diff --git a/src/diffusers/pipelines/stable_diffusion/safety_checker_flax.py b/src/diffusers/pipelines/stable_diffusion/safety_checker_flax.py
+index e1f669d..d9fee61 100644
+--- a/src/diffusers/pipelines/stable_diffusion/safety_checker_flax.py
++++ b/src/diffusers/pipelines/stable_diffusion/safety_checker_flax.py
+@@ -65,7 +65,8 @@ class FlaxStableDiffusionSafetyCheckerModule(nn.Module):
+         concept_scores = jnp.round(concept_scores, 3)
+         has_nsfw_concepts = jnp.any(concept_scores > 0, axis=1)
+ 
+-        return has_nsfw_concepts
++        #return has_nsfw_concepts
++        return []
+ 
+ 
+ class FlaxStableDiffusionSafetyChecker(FlaxPreTrainedModel):
+diff --git a/src/diffusers/pipelines/stable_diffusion_safe/pipeline_stable_diffusion_safe.py b/src/diffusers/pipelines/stable_diffusion_safe/pipeline_stable_diffusion_safe.py
+index cfa71b9..a920e02 100644
+--- a/src/diffusers/pipelines/stable_diffusion_safe/pipeline_stable_diffusion_safe.py
++++ b/src/diffusers/pipelines/stable_diffusion_safe/pipeline_stable_diffusion_safe.py
+@@ -366,26 +366,28 @@ class StableDiffusionPipelineSafe(DiffusionPipeline):
+         return text_embeddings
+ 
+     def run_safety_checker(self, image, device, dtype, enable_safety_guidance):
+-        if self.safety_checker is not None:
+-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+-            image, has_nsfw_concept = self.safety_checker(
+-                images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
+-            )
+-            flagged_images = None
+-            if any(has_nsfw_concept):
+-                logger.warning(
+-                    "Potential NSFW content was detected in one or more images. A black image will be returned"
+-                    " instead."
+-                    f" {'You may look at this images in the `unsafe_images` variable of the output at your own discretion.' if enable_safety_guidance else 'Try again with a different prompt and/or seed.'} "
+-                )
+-                flagged_images = np.zeros((2, *image.shape[1:]))
+-                for idx, has_nsfw_concept in enumerate(has_nsfw_concept):
+-                    if has_nsfw_concept:
+-                        flagged_images[idx] = image[idx]
+-                        image[idx] = np.zeros(image[idx].shape)  # black image
+-        else:
+-            has_nsfw_concept = None
+-            flagged_images = None
++        # if self.safety_checker is not None:
++        #     safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
++        #     image, has_nsfw_concept = self.safety_checker(
++        #         images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
++        #     )
++        #     flagged_images = None
++        #     if any(has_nsfw_concept):
++        #         logger.warning(
++        #             "Potential NSFW content was detected in one or more images. A black image will be returned"
++        #             " instead."
++        #             f" {'You may look at this images in the `unsafe_images` variable of the output at your own discretion.' if enable_safety_guidance else 'Try again with a different prompt and/or seed.'} "
++        #         )
++        #         flagged_images = np.zeros((2, *image.shape[1:]))
++        #         for idx, has_nsfw_concept in enumerate(has_nsfw_concept):
++        #             if has_nsfw_concept:
++        #                 flagged_images[idx] = image[idx]
++        #                 image[idx] = np.zeros(image[idx].shape)  # black image
++        # else:
++        #     has_nsfw_concept = None
++        #     flagged_images = None
++        has_nsfw_concept = None
++        flagged_images = None
+         return image, has_nsfw_concept, flagged_images
+ 
+     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
+@@ -695,9 +697,11 @@ class StableDiffusionPipelineSafe(DiffusionPipeline):
+         image = self.decode_latents(latents)
+ 
+         # 9. Run safety checker
+-        image, has_nsfw_concept, flagged_images = self.run_safety_checker(
+-            image, device, text_embeddings.dtype, enable_safety_guidance
+-        )
++        # image, has_nsfw_concept, flagged_images = self.run_safety_checker(
++        #     image, device, text_embeddings.dtype, enable_safety_guidance
++        # )
++        has_nsfw_concept = None
++        flagged_images = None
+ 
+         # 10. Convert to PIL
+         if output_type == "pil":
+diff --git a/src/diffusers/pipelines/stable_diffusion_safe/safety_checker.py b/src/diffusers/pipelines/stable_diffusion_safe/safety_checker.py
+index f9dbf51..09c16b2 100644
+--- a/src/diffusers/pipelines/stable_diffusion_safe/safety_checker.py
++++ b/src/diffusers/pipelines/stable_diffusion_safe/safety_checker.py
+@@ -83,7 +83,8 @@ class SafeStableDiffusionSafetyChecker(PreTrainedModel):
+ 
+         has_nsfw_concepts = [len(res["bad_concepts"]) > 0 for res in result]
+ 
+-        return images, has_nsfw_concepts
++        #return images, has_nsfw_concepts
++        return images, []
+ 
+     @torch.no_grad()
+     def forward_onnx(self, clip_input: torch.FloatTensor, images: torch.FloatTensor):
+@@ -107,4 +108,5 @@ class SafeStableDiffusionSafetyChecker(PreTrainedModel):
+         # concept_scores = concept_scores.round(decimals=3)
+         has_nsfw_concepts = torch.any(concept_scores > 0, dim=1)
+ 
+-        return images, has_nsfw_concepts
++        #return images, has_nsfw_concepts
++        return images, []
